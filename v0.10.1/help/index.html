@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TraceDraw Help</title>
+<script>
+(function(){var codes=["en", "zh-CN", "hi", "es", "fr", "ar", "bn", "ru", "pt-BR", "id", "de", "ja", "zh-TW", "it", "nl", "pl", "tr", "cs"],pick="en";
+var want=(navigator.languages||[navigator.language||"en"]);
+for(var i=0;i<want.length&&pick==="en";i++){var w=want[i];
+ for(var j=0;j<codes.length;j++){if(codes[j].toLowerCase()===w.toLowerCase()){pick=codes[j];break;}}
+ if(pick!=="en")break;
+ var base=w.split("-")[0].toLowerCase();
+ if(base==="zh"){pick=/tw|hk|mo|hant/i.test(w)?"zh-TW":"zh-CN";break;}
+ if(base==="pt"){pick="pt-BR";break;}
+ if(base!=="en"&&codes.indexOf(base)>=0){pick=base;break;}
+ if(base==="en")break;}
+location.replace(pick+"/index.html"+location.hash);})();
+</script>
+<noscript><meta http-equiv="refresh" content="0; url=en/index.html"></noscript>
+</head><body><a href="en/index.html">TraceDraw Help</a></body></html>
