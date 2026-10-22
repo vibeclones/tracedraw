@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TraceDraw: open-source vector editor</title>
+  <meta name="description" content="TraceDraw is an open-source vector editor written in Rust that opens .cdr files, here running in the browser. Alpha.">
+  <link rel="icon" type="image/png" href="icon-256.png">
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #d4d4d4; }
+    canvas#tracedraw { position: absolute; inset: 0; width: 100%; height: 100%; outline: none; }
+    #loading {
+      position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 14px; box-sizing: border-box; padding: 16px; overflow: auto;
+      font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: #3a3a3a; text-align: center;
+    }
+    #splash {
+      display: block; width: 100%; max-width: 640px; height: auto; flex: none;
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    #loading p { margin: 0; max-width: 640px; }
+    #loading .alpha {
+      display: inline-block; padding: 0 5px; border-radius: 3px; background: #fbe3b4; color: #6b4500;
+      font-size: 11px; font-weight: 600; vertical-align: 1px;
+    }
+    #loading a { color: #0b5cad; }
+    #loading .links a { white-space: nowrap; }
+    #loading-error { color: #a1260d; font-weight: 600; }
+  </style>
+</head>
+<!-- data-wasm-size: the module's size in bytes and 0.7.0 the version,
+     both filled in by the build (scripts/web/build.sh, CI). -->
+<body data-wasm-size="30774616">
+  <canvas id="tracedraw" tabindex="0"></canvas>
+  <div id="loading">
+    <!-- The splash screen of the desktop app (src/splash.rs, ui/brand.rs). -->
+    <svg id="splash" viewBox="0 0 640 380" role="img" aria-label="TraceDraw is loading">
+      <defs>
+        <linearGradient id="splash-across" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#244475"/>
+          <stop offset="1" stop-color="#1a3158"/>
+        </linearGradient>
+        <linearGradient id="splash-down" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#0e192d" stop-opacity="0"/>
+          <stop offset="1" stop-color="#0e192d"/>
+        </linearGradient>
+        <clipPath id="splash-clip"><rect width="640" height="380"/></clipPath>
+      </defs>
+      <g clip-path="url(#splash-clip)">
+        <rect width="640" height="380" fill="url(#splash-across)"/>
+        <rect width="640" height="380" fill="url(#splash-down)"/>
+        <g fill="none" stroke="#5caeff">
+          <path d="M435.2 410.4C505.6 114 588.8 437 659.2 182.4" stroke-width="1.62" stroke-opacity="0.235"/>
+          <path d="M345.6 -30.4C448 235.6 531.2 -95 659.2 -7.6" stroke-width="1.62" stroke-opacity="0.157"/>
+          <path d="M384 410.4C467.2 7.6 550.4 425.6 659.2 68.4" stroke-width="2.7" stroke-opacity="0.745"/>
+        </g>
+        <g stroke="#fff">
+          <line x1="418.2" y1="271.2" x2="470.3" y2="209.2" stroke-opacity="0.43"/>
+          <line x1="504.4" y1="226.7" x2="585.3" y2="228" stroke-opacity="0.43"/>
+          <g fill="#5caeff">
+            <circle cx="418.2" cy="271.2" r="4.05"/>
+            <circle cx="470.3" cy="209.2" r="4.05"/>
+            <circle cx="504.4" cy="226.7" r="4.05"/>
+            <circle cx="585.3" cy="228" r="4.05"/>
+          </g>
+          <g fill="#1a3158" stroke-width="1.3">
+            <rect x="438.9" y="234.8" width="10.8" height="10.8"/>
+            <rect x="539.5" y="222" width="10.8" height="10.8"/>
+          </g>
+        </g>
+        <image href="icon-256.png" x="44" y="64" width="96" height="96"/>
+        <text x="164" y="117" font-size="46" font-weight="700" fill="#fff">Trace<tspan fill="#7fc3ff">Draw</tspan></text>
+        <text x="166" y="149" font-size="17" fill="#c9d7ec">Vector illustration editor</text>
+        <rect y="286" width="640" height="94" fill="#0a1222" fill-opacity="0.88"/>
+        <line x1="0" y1="286" x2="640" y2="286" stroke="#fff" stroke-opacity="0.086"/>
+        <text id="loading-status" x="44" y="315" font-size="13" fill="#c9d7ec">Loading TraceDraw...</text>
+        <rect x="44" y="326" width="552" height="3" rx="1.5" fill="#fff" fill-opacity="0.12"/>
+        <rect id="loading-bar" x="44" y="326" width="0" height="3" rx="1.5" fill="#5caeff"/>
+        <text x="44" y="357" font-size="11.5" fill="#8fa3c0">Copyright &#169; 2026 Ighor Toth and the TraceDraw contributors</text>
+        <text x="596" y="357" font-size="11.5" fill="#8fa3c0" text-anchor="end">v0.7.0</text>
+      </g>
+      <rect x="0.5" y="0.5" width="639" height="379" fill="none" stroke="#fff" stroke-opacity="0.157"/>
+    </svg>
+    <p id="loading-error" role="alert" hidden></p>
+    <p><b>TraceDraw</b> <span class="alpha">alpha</span>: open-source vector editor that opens .cdr files. Written in Rust, free under the MIT or Apache-2.0 license.</p>
+    <p>Works best in a desktop browser with a mouse and keyboard. On a tablet choose Window &gt; Workspace &gt; Touch; a phone screen is too small for editing.</p>
+    <p class="links">
+      <a href="https://github.com/igtoth/tracedraw/releases/latest">Download the desktop app</a> &middot;
+      <a href="https://github.com/igtoth/tracedraw">Source code</a> &middot;
+      <a href="https://github.com/igtoth/tracedraw/issues">Report a problem</a>
+    </p>
+    <noscript><p>TraceDraw needs JavaScript, WebAssembly and WebGL 2 to run in the browser.</p></noscript>
+  </div>
+  <script type="module">
+    import init from "./tracedraw.js";
+
+    const status = document.getElementById("loading-status");
+    const bar = document.getElementById("loading-bar");
+    const error = document.getElementById("loading-error");
+    const total = Number(document.body.dataset.wasmSize) || 0;
+    // The bar's length at 100 %, in the splash's units.
+    const FULL = 552;
+    const mb = (n) => (n / 1048576).toFixed(1);
+    const say = (text) => { status.textContent = text; };
+    const fill = (fraction) => {
+      bar.setAttribute("width", (FULL * Math.max(0, Math.min(1, fraction))).toFixed(1));
+    };
+
+    // The module, downloaded here rather than by init() so the splash can
+    // show how far along it is. The download fills the bar to 90 %; the
+    // start fills the rest.
+    async function download() {
+      const res = await fetch(new URL("tracedraw_bg.wasm", import.meta.url));
+      if (!res.ok) {
+        throw new Error("the editor could not be downloaded (HTTP " + res.status + ")");
+      }
+      if (!res.body || !res.body.getReader) {
+        return new Uint8Array(await res.arrayBuffer());
+      }
+      const reader = res.body.getReader();
+      const parts = [];
+      let got = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        parts.push(value);
+        got += value.length;
+        if (total) {
+          const pct = Math.min(100, Math.floor((got * 100) / total));
+          fill(0.9 * got / total);
+          say("Loading TraceDraw: " + mb(got) + " of " + mb(total) + " MB (" + pct + "%)");
+        } else {
+          // Without the size, the bar creeps towards 90 % as the
+          // megabytes come in.
+          fill(0.9 * (1 - Math.exp(-got / 20971520)));
+          say("Loading TraceDraw: " + mb(got) + " MB");
+        }
+      }
+      const bytes = new Uint8Array(got);
+      let at = 0;
+      for (const p of parts) {
+        bytes.set(p, at);
+        at += p.length;
+      }
+      return bytes;
+    }
+
+    async function start() {
+      try {
+        const bytes = await download();
+        say("Preparing the workspace...");
+        fill(0.95);
+        await init({ module_or_path: bytes });
+      } catch (e) {
+        say("TraceDraw could not start");
+        bar.setAttribute("fill", "#e0533d");
+        error.textContent = "TraceDraw could not start: " + e + ". A browser with WebAssembly and WebGL 2 is needed; the desktop app works without one.";
+        error.hidden = false;
+      }
+    }
+
+    start();
+  </script>
+</body>
+</html>
