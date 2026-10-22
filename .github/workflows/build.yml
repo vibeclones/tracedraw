@@ -1,0 +1,172 @@
+name: Mirror upstream releases
+
+# TraceDraw publishes its browser build only on its own project page (the newest version), not with its releases. So each
+# release tag is built here, with the same steps as the project's own "web" job, and the finished page is kept under
+# v<version>/. The page uses only relative paths, so it needs no changes to work from a subfolder.
+
+on:
+  schedule:
+    - cron: "37 6 * * *"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "How many of the newest releases to consider"
+        required: false
+        default: "100"
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency: build
+
+env:
+  UP: igtoth/tracedraw
+  APP: tracedraw
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      tags: ${{ steps.pick.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: pick
+        run: |
+          tags=$(gh release list -R "$UP" --limit "${{ inputs.limit || '100' }}" --exclude-drafts --exclude-pre-releases --json tagName -q '.[].tagName')
+          # Versions already here, or already recorded in skipped.json as unbuildable, are not tried again.
+          todo=$(for t in $tags; do
+            v="${t#v}"
+            [ -d "v$v" ] && continue
+            [ -f skipped.json ] && jq -e --arg v "$v" 'has($v)' skipped.json >/dev/null && continue
+            echo "$t"
+          done | jq -R . | jq -sc .)
+          echo "tags=$todo" >> "$GITHUB_OUTPUT"
+          echo "To build: $todo"
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.tags != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: ${{ fromJson(needs.plan.outputs.tags) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.UP }}
+          ref: ${{ matrix.tag }}
+
+      # The toolchain and wasm-bindgen versions this tag's own workflow pins.
+      - name: Pinned versions
+        id: pin
+        run: |
+          echo "rust=$(grep -o 'rust-toolchain@[0-9.]*' .github/workflows/build.yml | grep -v '@$' | head -n1 | cut -d@ -f2)" >> "$GITHUB_OUTPUT"
+          echo "wbg=$(grep -o 'wasm-bindgen@[0-9.]*' .github/workflows/build.yml | head -n1 | cut -d@ -f2)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.pin.outputs.rust }}
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm32-${{ matrix.tag }}
+      - name: Fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-liberation fonts-dejavu-core fonts-noto-core
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@${{ steps.pin.outputs.wbg }}
+
+      - name: Build
+        run: cargo build --target wasm32-unknown-unknown --profile web -p tracedraw
+
+      - name: Page
+        run: |
+          ver="${{ matrix.tag }}"; ver="${ver#v}"
+          mkdir -p site
+          wasm-bindgen --target web --no-typescript --out-dir site target/wasm32-unknown-unknown/web/tracedraw.wasm
+          [ -f web/FONTS.md ] && cp web/FONTS.md site/
+          size=$(wc -c < site/tracedraw_bg.wasm | tr -d ' ')
+          sed -e "s/data-wasm-size=\"0\"/data-wasm-size=\"$size\"/" -e "s/@VERSION@/$ver/" web/index.html > site/index.html
+          grep -q "data-wasm-size=\"$size\"" site/index.html
+          ! grep -q "@VERSION@" site/index.html
+          cp assets/icon/tracedraw-256.png site/icon-256.png
+
+      # The same optional pieces as the project's page, for the tags that have them.
+      - name: Font folder and catalog
+        run: |
+          if [ -f web/font_folder.py ]; then
+            for p in fonts-texgyre fonts-dejavu-core fonts-dejavu-extra fonts-dejavu-mono; do
+              sudo apt-get install -y --no-install-recommends "$p" || echo "::warning::font package $p is not available"
+            done
+            python3 web/font_folder.py web/fonts.txt site/fonts
+          fi
+          [ -f web/font_catalog.py ] && python3 web/font_catalog.py web/fonts.txt site/fonts || true
+      - name: Help
+        run: '[ -f web/help_site.py ] && python3 web/help_site.py docs/help apps/tracedraw/lang site/help || true'
+
+      - name: Licenses
+        run: |
+          for f in LICENSE-MIT LICENSE-APACHE; do cp "$f" site/ 2>/dev/null || true; done
+          printf 'Built from release %s of https://github.com/%s\nhttps://github.com/%s/releases/tag/%s\nNo changes were made to the page: it uses only relative paths, so it works from a subfolder as built.\nTraceDraw is MIT OR Apache-2.0; the full source for this version is at https://github.com/%s/tree/%s\n' "${{ matrix.tag }}" "$UP" "$UP" "${{ matrix.tag }}" "$UP" "${{ matrix.tag }}" > site/SOURCE.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site-${{ matrix.tag }}
+          path: site
+          if-no-files-found: error
+
+  publish:
+    needs: [plan, build]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: built
+        continue-on-error: true
+
+      - name: Add built versions
+        run: |
+          tags='${{ needs.plan.outputs.tags }}'
+          for tag in $(echo "$tags" | jq -r '.[]'); do
+            ver="${tag#v}"
+            if [ -d "built/site-$tag" ]; then
+              mv "built/site-$tag" "v$ver"
+              bash scripts/skip.sh del "$ver"
+            else
+              bash scripts/skip.sh add "$ver" "This release's browser build could not be built from source."
+            fi
+          done
+          rm -rf built
+
+      - name: Update latest and versions.json
+        run: |
+          versions=$(find . -maxdepth 1 -type d -name 'v[0-9]*' -printf '%f\n' | sed 's/^v//' | sort -rV)
+          [ -n "$versions" ] || { echo "No versions"; exit 0; }
+          latest=$(echo "$versions" | head -n1)
+          mkdir -p latest
+          printf '<!doctype html><meta charset="utf-8"><title>%s</title><meta http-equiv="refresh" content="0; url=../v%s/"><link rel="canonical" href="../v%s/"><a href="../v%s/">Open %s %s</a>\n' "$APP" "$latest" "$latest" "$latest" "$APP" "$latest" > latest/index.html
+          echo "$versions" | jq -R . | jq -s --arg latest "$latest" '{latest: $latest, versions: .}' > versions.json
+          cat versions.json
+
+      - name: Keep the site under its size cap
+        run: bash scripts/prune.sh
+
+      - name: Commit and request a Pages build
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nothing new"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Mirror upstream release"
+          git push
+          gh api -X POST "repos/${{ github.repository }}/pages/builds"
