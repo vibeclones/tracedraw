@@ -91,20 +91,16 @@ jobs:
           [ -f web/FONTS.md ] && cp web/FONTS.md site/
           size=$(wc -c < site/tracedraw_bg.wasm | tr -d ' ')
           sed -e "s/data-wasm-size=\"0\"/data-wasm-size=\"$size\"/" -e "s/@VERSION@/$ver/" web/index.html > site/index.html
-          grep -q "data-wasm-size=\"$size\"" site/index.html
+          # The first tags' page has no size or version marker; later ones must have both filled in.
+          if grep -q 'data-wasm-size=' web/index.html; then grep -q "data-wasm-size=\"$size\"" site/index.html; fi
           ! grep -q "@VERSION@" site/index.html
           cp assets/icon/tracedraw-256.png site/icon-256.png
 
-      # The same optional pieces as the project's page, for the tags that have them.
-      - name: Font folder and catalog
-        run: |
-          if [ -f web/font_folder.py ]; then
-            for p in fonts-texgyre fonts-dejavu-core fonts-dejavu-extra fonts-dejavu-mono; do
-              sudo apt-get install -y --no-install-recommends "$p" || echo "::warning::font package $p is not available"
-            done
-            python3 web/font_folder.py web/fonts.txt site/fonts
-          fi
-          [ -f web/font_catalog.py ] && python3 web/font_catalog.py web/fonts.txt site/fonts || true
+      # The project's page also has a font folder (about 125 MB of free fonts, identical from version to version) that its
+      # own release zip leaves out because the page works without it (the module bundles its core fonts). It is left out
+      # here too, to fit every version under the Pages size limit; the font catalog, which points at google/fonts, is kept.
+      - name: Font catalog
+        run: '[ -f web/font_catalog.py ] && python3 web/font_catalog.py web/fonts.txt site/fonts || true'
       - name: Help
         run: '[ -f web/help_site.py ] && python3 web/help_site.py docs/help apps/tracedraw/lang site/help || true'
 
