@@ -1,4 +1,0 @@
-Built from release v0.19.3 of https://github.com/igtoth/tracedraw
-https://github.com/igtoth/tracedraw/releases/tag/v0.19.3
-No changes were made to the page: it uses only relative paths, so it works from a subfolder as built.
-TraceDraw is MIT OR Apache-2.0; the full source for this version is at https://github.com/igtoth/tracedraw/tree/v0.19.3
